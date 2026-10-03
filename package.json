@@ -1,0 +1,11 @@
+{
+  "name": "looping-musica",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Toca musicas em loop no proprio PC, com painel no navegador",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  }
+}

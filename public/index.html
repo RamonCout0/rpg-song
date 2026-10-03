@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Looping Música</title>
+<style>
+  :root { --bg:#14121c; --card:#1e1b2b; --linha:#332e47; --txt:#ece8f7; --mudo:#9a93b5; --cor:#b197fc; --erro:#ff6b6b; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--txt); font:15px/1.4 system-ui,sans-serif; }
+  main { max-width:760px; margin:0 auto; padding:24px 16px 60px; display:grid; gap:16px; }
+  h1 { margin:0; font-size:22px; }
+  h2 { margin:0 0 10px; font-size:13px; text-transform:uppercase; letter-spacing:.08em; color:var(--mudo); }
+  section { background:var(--card); border:1px solid var(--linha); border-radius:12px; padding:16px; }
+  .linha { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  input[type=text] { flex:1; min-width:0; background:var(--bg); color:var(--txt); border:1px solid var(--linha); border-radius:8px; padding:9px 10px; font:inherit; }
+  button { background:var(--linha); color:var(--txt); border:0; border-radius:8px; padding:9px 14px; font:inherit; cursor:pointer; }
+  button:hover { filter:brightness(1.2); }
+  button.pri { background:var(--cor); color:#1a1030; font-weight:600; }
+  button.on { outline:2px solid var(--cor); }
+  button:disabled { opacity:.4; cursor:default; }
+  #agora { font-size:20px; font-weight:600; margin-bottom:4px; }
+  #sub { color:var(--mudo); font-size:13px; }
+  .controles { margin-top:14px; display:grid; gap:12px; }
+  input[type=range] { flex:1; accent-color:var(--cor); }
+  .faixa { display:flex; align-items:center; gap:10px; padding:8px 0; border-top:1px solid var(--linha); }
+  .faixa:first-child { border-top:0; }
+  .faixa .nome { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .faixa.ativa .nome { color:var(--cor); font-weight:600; }
+  .faixa button { padding:6px 10px; }
+  #msg { min-height:20px; font-size:13px; color:var(--mudo); }
+  #msg.erro { color:var(--erro); }
+  kbd { background:var(--linha); border-radius:4px; padding:1px 6px; font-size:12px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>🔁 Looping Música</h1>
+
+  <section>
+    <h2>Tocando agora</h2>
+    <div id="agora">—</div>
+    <div id="sub"></div>
+    <div class="controles">
+      <input type="range" id="posicao" min="0" max="1000" value="0" disabled>
+      <div class="linha">
+        <button id="pausar">⏯ Pausar</button>
+        <button id="pular">⏭ Pular</button>
+        <button id="parar">⏹ Parar</button>
+        <button id="tudo" class="pri">▶ Tocar todas</button>
+      </div>
+      <div class="linha">
+        <button id="modoFaixa">🔂 Repetir faixa</button>
+        <button id="modoLista">🔁 Repetir lista</button>
+        <button id="aleatorio">🔀 Aleatório</button>
+      </div>
+      <div class="linha">
+        <span>🔊</span>
+        <input type="range" id="volume" min="0" max="100" step="1">
+        <span id="volumeNum" style="width:44px;text-align:right"></span>
+      </div>
+      <div style="color:var(--mudo);font-size:12px">Atalhos: <kbd>Espaço</kbd> pausa · <kbd>→</kbd> pula · <kbd>↑</kbd><kbd>↓</kbd> volume</div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Músicas</h2>
+    <div id="lista"></div>
+  </section>
+
+  <section>
+    <h2>Baixar do YouTube</h2>
+    <div class="linha">
+      <input type="text" id="url" placeholder="Cole o link do vídeo">
+      <button id="baixar" class="pri">Baixar</button>
+    </div>
+    <div id="progresso" style="margin-top:8px;color:var(--mudo);font-size:13px;font-family:monospace"></div>
+  </section>
+
+  <div id="msg"></div>
+</main>
+
+<audio id="audio" preload="auto"></audio>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const audio = $('audio');
+const salvo = (() => { try { return JSON.parse(localStorage.getItem('looping') ?? '{}'); } catch { return {}; } })();
+
+let musicas = [];
+let atual = null;            // arquivo tocando
+let voltas = 0;
+const prefs = { modo: salvo.modo ?? 'faixa', aleatorio: !!salvo.aleatorio, volume: salvo.volume ?? 80 };
+
+function guardar() { try { localStorage.setItem('looping', JSON.stringify(prefs)); } catch {} }
+function esc(t) { return String(t).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
+function aviso(t, erro) { $('msg').textContent = t || ''; $('msg').className = erro ? 'erro' : ''; }
+function titulo(arq) { return musicas.find((m) => m.arquivo === arq)?.titulo ?? arq; }
+
+function tocar(arquivo) {
+  atual = arquivo;
+  voltas = 0;
+  audio.src = '/audio/' + encodeURIComponent(arquivo);
+  audio.volume = prefs.volume / 100;
+  audio.play().catch((e) => aviso('Não consegui tocar: ' + e.message, true));
+  desenhar();
+}
+
+function proxima() {
+  if (!musicas.length) return;
+  let alvo;
+  if (prefs.aleatorio && musicas.length > 1) {
+    const outras = musicas.filter((m) => m.arquivo !== atual);
+    alvo = outras[Math.floor(Math.random() * outras.length)];
+  } else {
+    const i = musicas.findIndex((m) => m.arquivo === atual);
+    alvo = musicas[(i + 1) % musicas.length];
+  }
+  tocar(alvo.arquivo);
+}
+
+// Fim da faixa = o loop em si.
+audio.addEventListener('ended', () => {
+  voltas += 1;
+  if (prefs.modo === 'lista') proxima();
+  else { audio.currentTime = 0; audio.play(); desenhar(); }
+});
+
+audio.addEventListener('error', () => { if (atual) aviso('Erro ao carregar a música (o arquivo ainda existe?)', true); });
+audio.addEventListener('timeupdate', () => {
+  if (audio.duration) $('posicao').value = Math.round((audio.currentTime / audio.duration) * 1000);
+});
+audio.addEventListener('play', desenhar);
+audio.addEventListener('pause', desenhar);
+
+function fmt(s) { s = Math.floor(s || 0); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; }
+setInterval(() => {
+  if (atual) $('sub').textContent =
+    `${fmt(audio.currentTime)} / ${fmt(audio.duration)} · voltas completas: ${voltas}` + (audio.paused ? ' · pausado' : '');
+}, 500);
+
+function desenhar() {
+  $('agora').textContent = atual ? (audio.paused ? '⏸ ' : '') + titulo(atual) : '—';
+  if (!atual) $('sub').textContent = '';
+  $('posicao').disabled = !atual;
+  $('modoFaixa').classList.toggle('on', prefs.modo === 'faixa');
+  $('modoLista').classList.toggle('on', prefs.modo === 'lista');
+  $('aleatorio').classList.toggle('on', prefs.aleatorio);
+  $('volume').value = prefs.volume;
+  $('volumeNum').textContent = prefs.volume + '%';
+  $('lista').innerHTML = musicas.length ? musicas.map((f) => `
+    <div class="faixa ${atual === f.arquivo ? 'ativa' : ''}">
+      <span class="nome" title="${esc(f.titulo)}">${esc(f.titulo)}</span>
+      <button data-tocar="${esc(f.arquivo)}">▶ Tocar</button>
+      <button data-apagar="${esc(f.arquivo)}" title="Apagar do disco">🗑</button>
+    </div>`).join('') : '<div style="color:var(--mudo)">Nenhuma música ainda. Baixe uma abaixo.</div>';
+}
+
+async function carregar() {
+  musicas = await (await fetch('/api/musicas')).json();
+  desenhar();
+}
+
+function pausar() { if (!atual) return; audio.paused ? audio.play() : audio.pause(); }
+function parar() { audio.pause(); audio.removeAttribute('src'); audio.load(); atual = null; desenhar(); }
+function volume(v) { prefs.volume = Math.min(100, Math.max(0, v)); audio.volume = prefs.volume / 100; guardar(); desenhar(); }
+function modo(m) { prefs.modo = m; guardar(); desenhar(); }
+
+$('pausar').onclick = pausar;
+$('pular').onclick = () => { if (atual) proxima(); };
+$('parar').onclick = parar;
+$('tudo').onclick = () => {
+  if (!musicas.length) return aviso('A pasta de músicas está vazia', true);
+  prefs.modo = 'lista'; guardar();
+  tocar((prefs.aleatorio ? musicas[Math.floor(Math.random() * musicas.length)] : musicas[0]).arquivo);
+};
+$('modoFaixa').onclick = () => modo('faixa');
+$('modoLista').onclick = () => modo('lista');
+$('aleatorio').onclick = () => { prefs.aleatorio = !prefs.aleatorio; guardar(); desenhar(); };
+$('volume').oninput = (e) => volume(Number(e.target.value));
+$('posicao').oninput = (e) => { if (audio.duration) audio.currentTime = (e.target.value / 1000) * audio.duration; };
+
+$('lista').onclick = async (e) => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  if (b.dataset.tocar) tocar(b.dataset.tocar);
+  if (b.dataset.apagar && confirm('Apagar esta música do disco?')) {
+    if (atual === b.dataset.apagar) parar();
+    const r = await (await fetch('/api/apagar', { method: 'POST', body: JSON.stringify({ arquivo: b.dataset.apagar }) })).json();
+    aviso(r.ok ? '' : r.mensagem, !r.ok);
+    carregar();
+  }
+};
+
+document.addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT' && e.target.type === 'text') return;
+  if (e.code === 'Space') { e.preventDefault(); pausar(); }
+  else if (e.code === 'ArrowRight' && atual) proxima();
+  else if (e.code === 'ArrowUp') { e.preventDefault(); volume(prefs.volume + 5); }
+  else if (e.code === 'ArrowDown') { e.preventDefault(); volume(prefs.volume - 5); }
+});
+
+$('baixar').onclick = async () => {
+  const url = $('url').value.trim();
+  if (!url) return;
+  const r = await (await fetch('/api/baixar', { method: 'POST', body: JSON.stringify({ url }) })).json();
+  if (!r.ok) return aviso(r.mensagem, true);
+  $('baixar').disabled = true;
+  const t = setInterval(async () => {
+    const d = await (await fetch('/api/download')).json();
+    $('progresso').textContent = d.linha;
+    if (d.ativo) return;
+    clearInterval(t);
+    $('baixar').disabled = false;
+    if (d.erro) { $('progresso').textContent = ''; aviso(d.erro, true); }
+    else { $('progresso').textContent = 'Pronto: ' + d.pronto; $('url').value = ''; aviso(''); carregar(); }
+  }, 800);
+};
+
+carregar();
+</script>
+</body>
+</html>
