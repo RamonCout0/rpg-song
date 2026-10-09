@@ -8,6 +8,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { PORTA, DIR_PUBLICO, DIR_MUSICAS } from './src/config.js';
 import { listarMusicas, apagarMusica, baixar, EXTENSOES } from './src/biblioteca.js';
+import { analisar, loopsValidos } from './src/analise.js';
+import { listarModelos, escolherModelo } from './src/ollama.js';
 
 const TIPOS = {
   '.html': 'text/html; charset=utf-8',
@@ -21,6 +23,26 @@ const TIPOS = {
 };
 
 let download = { ativo: false, linha: '', erro: '', pronto: '' };
+
+// Analise de loops: uma musica por vez (o CPU do notebook agradece).
+let analise = { ativo: false, arquivo: '', etapa: '', fila: 0, erros: [] };
+const fila = [];
+
+async function processarFila() {
+  if (analise.ativo) return;
+  analise = { ativo: true, arquivo: '', etapa: '', fila: fila.length, erros: [] };
+  while (fila.length) {
+    const arquivo = fila.shift();
+    analise.arquivo = arquivo;
+    analise.fila = fila.length;
+    try {
+      await analisar(arquivo, (etapa) => (analise.etapa = etapa));
+    } catch (e) {
+      analise.erros.push(`${arquivo}: ${e.message}`);
+    }
+  }
+  analise = { ...analise, ativo: false, arquivo: '', etapa: '', fila: 0 };
+}
 
 function json(res, codigo, corpo) {
   res.writeHead(codigo, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
@@ -78,6 +100,27 @@ const servidor = http.createServer(async (req, res) => {
 
   if (caminho === '/api/musicas') return json(res, 200, listarMusicas());
   if (caminho === '/api/download') return json(res, 200, download);
+  if (caminho === '/api/loops') return json(res, 200, loopsValidos());
+
+  if (caminho === '/api/analise' && req.method === 'GET') return json(res, 200, analise);
+
+  if (caminho === '/api/analise' && req.method === 'POST') {
+    const { arquivo, todas } = await lerCorpo(req);
+    const existentes = listarMusicas().map((m) => m.arquivo);
+    const pedidas = todas ? existentes.filter((a) => !loopsValidos()[a]) : existentes.filter((a) => a === arquivo);
+    for (const a of pedidas) if (!fila.includes(a) && a !== analise.arquivo) fila.push(a);
+    processarFila();
+    return json(res, 200, { ok: true, enfileiradas: pedidas.length });
+  }
+
+  if (caminho === '/api/ollama') {
+    try {
+      const modelos = await listarModelos();
+      return json(res, 200, { ativo: true, modelo: escolherModelo(modelos), modelos: modelos.map((m) => m.nome) });
+    } catch {
+      return json(res, 200, { ativo: false });
+    }
+  }
 
   if (caminho === '/api/baixar' && req.method === 'POST') {
     if (download.ativo) return json(res, 409, { ok: false, mensagem: 'ja existe um download em andamento' });

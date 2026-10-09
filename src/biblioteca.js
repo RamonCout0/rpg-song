@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { DIR_MUSICAS, DIR_FERRAMENTAS } from './config.js';
+import { esquecerLoops } from './analise.js';
 
 const INDICE = path.join(DIR_MUSICAS, '_titulos.json');
 export const EXTENSOES = new Set(['.opus', '.ogg', '.mp3', '.m4a', '.webm', '.wav', '.flac']);
@@ -50,6 +51,7 @@ export function apagarMusica(arquivo) {
   const titulos = lerIndice();
   delete titulos[limpo];
   gravarIndice(titulos);
+  esquecerLoops(limpo);
 }
 
 export function baixar(url, aoProgredir = () => {}) {

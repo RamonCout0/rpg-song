@@ -1,0 +1,216 @@
+{
+  "Mega Man Star Force OST - T26： Wave Battle (Boss Theme).opus": {
+    "versao": 1,
+    "bytes": 1908364,
+    "duracao": 141.99,
+    "bpm": 144,
+    "modelo": "llama3.2:1b",
+    "porIA": false,
+    "resumo": "A estrutura da música é uma mistura de ritmos e harmonias que evocam uma sensação de movimento e energia, criando uma experiência auditiva dinâmica e envolvente.",
+    "aviso": "",
+    "saltos": [
+      {
+        "id": 4,
+        "de": 64.48,
+        "para": 9.85,
+        "qualidade": 100,
+        "papel": "variacao"
+      },
+      {
+        "id": 7,
+        "de": 72.31,
+        "para": 17.69,
+        "qualidade": 100,
+        "papel": "variacao"
+      },
+      {
+        "id": 10,
+        "de": 88.49,
+        "para": 33.88,
+        "qualidade": 100,
+        "papel": "variacao"
+      },
+      {
+        "id": 14,
+        "de": 110.84,
+        "para": 56.17,
+        "qualidade": 100,
+        "papel": "principal"
+      }
+    ]
+  },
+  "Beautiful Days (Piano Arrange).opus": {
+    "versao": 1,
+    "bytes": 3838258,
+    "duracao": 231.45,
+    "bpm": 130,
+    "modelo": "llama3.2:1b",
+    "porIA": true,
+    "resumo": "A estrutura da música é uma mistura de ritmos e harmonias que evolui ao longo do tempo, criando uma experiência auditiva única e envolvente.",
+    "aviso": "",
+    "saltos": [
+      {
+        "id": 1,
+        "de": 63.53,
+        "para": 8.99,
+        "qualidade": 95,
+        "papel": "principal"
+      },
+      {
+        "id": 2,
+        "de": 66.71,
+        "para": 12.17,
+        "qualidade": 93,
+        "papel": "variacao"
+      },
+      {
+        "id": 3,
+        "de": 74.44,
+        "para": 19.89,
+        "qualidade": 88,
+        "papel": "variacao"
+      },
+      {
+        "id": 4,
+        "de": 77.62,
+        "para": 23.06,
+        "qualidade": 95,
+        "papel": "variacao"
+      }
+    ]
+  },
+  "DR：AE OST Disc 2 - 02 Ghost Stories From the School District of Revolution.opus": {
+    "versao": 1,
+    "bytes": 3835294,
+    "duracao": 233.43,
+    "bpm": 118,
+    "modelo": "llama3.2:1b",
+    "porIA": true,
+    "resumo": "A estrutura da música é uma mistura de ritmos alternados e trechos de longa duração para manter a continuidade e a energia do jogo.",
+    "aviso": "",
+    "saltos": [
+      {
+        "id": 1,
+        "de": 110.56,
+        "para": 37.35,
+        "qualidade": 98,
+        "papel": "principal"
+      },
+      {
+        "id": 2,
+        "de": 119.72,
+        "para": 46.55,
+        "qualidade": 95,
+        "papel": "variacao"
+      },
+      {
+        "id": 4,
+        "de": 165,
+        "para": 26.71,
+        "qualidade": 100,
+        "papel": "variacao"
+      },
+      {
+        "id": 6,
+        "de": 175.15,
+        "para": 36.84,
+        "qualidade": 100,
+        "papel": "variacao"
+      },
+      {
+        "id": 8,
+        "de": 182.75,
+        "para": 44.51,
+        "qualidade": 100,
+        "papel": "variacao"
+      }
+    ]
+  },
+  "Músicas de Elevador, Ambiente Relaxante e Tranquilizante.opus": {
+    "versao": 1,
+    "bytes": 16911624,
+    "duracao": 935.31,
+    "bpm": 86,
+    "modelo": "llama3.2:1b",
+    "porIA": true,
+    "resumo": "A estrutura da música é uma mistura de ritmos alternados e trechos de longa duração, criando uma sensação de continuidade e mudança constante.",
+    "aviso": "",
+    "saltos": [
+      {
+        "id": 1,
+        "de": 327.69,
+        "para": 283.55,
+        "qualidade": 100,
+        "papel": "principal"
+      },
+      {
+        "id": 2,
+        "de": 331.18,
+        "para": 287.04,
+        "qualidade": 100,
+        "papel": "variacao"
+      },
+      {
+        "id": 3,
+        "de": 334.62,
+        "para": 290.48,
+        "qualidade": 100,
+        "papel": "variacao"
+      },
+      {
+        "id": 4,
+        "de": 342.9,
+        "para": 298.76,
+        "qualidade": 100,
+        "papel": "variacao"
+      }
+    ]
+  },
+  "New Danganronpa V3 Mini OST - 07. Class Trial (Universal Edition).opus": {
+    "versao": 1,
+    "bytes": 5861923,
+    "duracao": 352.03,
+    "bpm": 136,
+    "modelo": "llama3.2:1b",
+    "porIA": false,
+    "resumo": "A estrutura da música é uma mistura de ritmos e trechos longos e curtos, criando uma dinâmica constante que mantém o jogador engajado.",
+    "aviso": "",
+    "saltos": [
+      {
+        "id": 1,
+        "de": 103.59,
+        "para": 2.54,
+        "qualidade": 82,
+        "papel": "variacao"
+      },
+      {
+        "id": 2,
+        "de": 190.21,
+        "para": 89.15,
+        "qualidade": 96,
+        "papel": "variacao"
+      },
+      {
+        "id": 3,
+        "de": 194.72,
+        "para": 93.66,
+        "qualidade": 93,
+        "papel": "variacao"
+      },
+      {
+        "id": 4,
+        "de": 198.78,
+        "para": 97.73,
+        "qualidade": 87,
+        "papel": "variacao"
+      },
+      {
+        "id": 13,
+        "de": 305.24,
+        "para": 29.14,
+        "qualidade": 92,
+        "papel": "principal"
+      }
+    ]
+  }
+}

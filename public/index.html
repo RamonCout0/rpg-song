@@ -30,6 +30,9 @@
   .faixa button { padding:6px 10px; }
   #msg { min-height:20px; font-size:13px; color:var(--mudo); }
   #msg.erro { color:var(--erro); }
+  .badge { font-size:12px; color:var(--cor); margin-left:6px; }
+  #iaInfo { color:var(--mudo); font-size:13px; margin-top:6px; }
+  select { background:var(--bg); color:var(--txt); border:1px solid var(--linha); border-radius:8px; padding:7px 8px; font:inherit; }
   kbd { background:var(--linha); border-radius:4px; padding:1px 6px; font-size:12px; }
 </style>
 </head>
@@ -41,6 +44,7 @@
     <h2>Tocando agora</h2>
     <div id="agora">—</div>
     <div id="sub"></div>
+    <div id="iaInfo"></div>
     <div class="controles">
       <input type="range" id="posicao" min="0" max="1000" value="0" disabled>
       <div class="linha">
@@ -53,6 +57,15 @@
         <button id="modoFaixa">🔂 Repetir faixa</button>
         <button id="modoLista">🔁 Repetir lista</button>
         <button id="aleatorio">🔀 Aleatório</button>
+        <button id="ia" title="Usa os pontos de loop achados pela análise (🧠) em vez de repetir a música inteira">🧠 Loop inteligente</button>
+      </div>
+      <div class="linha" style="color:var(--mudo);font-size:13px">
+        Na lista, trocar de música depois de
+        <select id="minutos">
+          <option value="0">nunca (só pulando)</option>
+          <option value="5">5 min</option><option value="10">10 min</option>
+          <option value="15">15 min</option><option value="30">30 min</option>
+        </select>
       </div>
       <div class="linha">
         <span>🔊</span>
@@ -66,6 +79,19 @@
   <section>
     <h2>Músicas</h2>
     <div id="lista"></div>
+  </section>
+
+  <section>
+    <h2>Loops com IA (Ollama)</h2>
+    <div class="linha">
+      <button id="analisarTodas" class="pri">🧠 Analisar músicas sem loop</button>
+      <span id="ollamaEstado" style="color:var(--mudo);font-size:13px"></span>
+    </div>
+    <div id="analiseProg" style="margin-top:8px;color:var(--mudo);font-size:13px"></div>
+    <div style="margin-top:8px;color:var(--mudo);font-size:12px">
+      A análise do áudio roda no próprio PC (sem placa de vídeo) e fica salva: faça uma vez, em casa.
+      O Ollama escolhe entre os pontos achados; sem ele, uma heurística escolhe.
+    </div>
   </section>
 
   <section>
@@ -90,18 +116,149 @@ const salvo = (() => { try { return JSON.parse(localStorage.getItem('looping') ?
 let musicas = [];
 let atual = null;            // arquivo tocando
 let voltas = 0;
-const prefs = { modo: salvo.modo ?? 'faixa', aleatorio: !!salvo.aleatorio, volume: salvo.volume ?? 80 };
+let loops = {};              // arquivo -> analise (saltos)
+const prefs = { modo: salvo.modo ?? 'faixa', aleatorio: !!salvo.aleatorio, volume: salvo.volume ?? 80,
+                ia: salvo.ia ?? true, minutos: salvo.minutos ?? 10 };
 
 function guardar() { try { localStorage.setItem('looping', JSON.stringify(prefs)); } catch {} }
 function esc(t) { return String(t).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
 function aviso(t, erro) { $('msg').textContent = t || ''; $('msg').className = erro ? 'erro' : ''; }
 function titulo(arq) { return musicas.find((m) => m.arquivo === arq)?.titulo ?? arq; }
 
+// ---------- motor de loop inteligente (Web Audio: saltos sem corte) ----------
+const XF = 0.04;            // cruzamento (s) no ponto de salto
+const motor = { ctx: null, ganho: null, buf: null, arquivo: null, plano: null, segs: [], fontes: [],
+                cursor: 0, proximo: 0, agendado: 0, timer: null, fim: false, usos: {}, ativo: false,
+                ultimo: '', pedido: 0, saltos: 0 };
+
+function curva(subindo) {
+  return Float32Array.from({ length: 16 }, (_, i) => { const x = i / 15; return Math.sin((subindo ? x : 1 - x) * Math.PI / 2); });
+}
+
+function garantirCtx() {
+  if (motor.ctx) return;
+  try { motor.ctx = new AudioContext({ sampleRate: 32000 }); } catch { motor.ctx = new AudioContext(); } // 32 kHz gasta menos RAM
+  motor.ganho = motor.ctx.createGain();
+  motor.ganho.gain.value = prefs.volume / 100;
+  motor.ganho.connect(motor.ctx.destination);
+}
+
+function pararMotor() {
+  clearInterval(motor.timer);
+  motor.ativo = false;
+  for (const f of motor.fontes) { f.onended = null; try { f.stop(); } catch {} }
+  motor.fontes = []; motor.segs = [];
+}
+
+function escolherSalto() {
+  const lim = prefs.modo === 'lista' && prefs.minutos > 0 && motor.agendado >= prefs.minutos * 60;
+  const futuros = motor.plano.saltos.filter((s) => s.de > motor.cursor + 0.3).sort((a, b) => a.de - b.de);
+  if (lim || !futuros.length) return null;   // acabou o tempo: deixa a música chegar ao fim
+  const ultimo = futuros[futuros.length - 1]; // o último salto é sempre tomado, senão a faixa acabaria
+  let alvo = ultimo;
+  for (const s of futuros) {
+    if (s === ultimo) break;
+    const peso = (s.papel === 'principal' ? 0.7 : 0.5) / (1 + (motor.usos[s.id] ?? 0));
+    if (Math.random() < peso) { alvo = s; break; }
+  }
+  motor.usos[alvo.id] = (motor.usos[alvo.id] ?? 0) + 1;
+  const menor = Math.min(...motor.plano.saltos.map((s) => motor.usos[s.id] ?? 0));
+  if (menor > 0) for (const s of motor.plano.saltos) motor.usos[s.id] = (motor.usos[s.id] ?? 0) - menor; // rodízio
+  return alvo;
+}
+
+function agendar() {
+  const { ctx, buf } = motor;
+  while (!motor.fim && motor.proximo - ctx.currentTime < 1.2) {
+    const salto = escolherSalto();
+    const de = salto ? salto.de : buf.duration;
+    const dur = de - motor.cursor;
+    const entrouPorSalto = motor.segs.length > 0 && motor.segs[motor.segs.length - 1].salto;
+    const fonte = ctx.createBufferSource();
+    fonte.buffer = buf;
+    const g = ctx.createGain();
+    fonte.connect(g); g.connect(motor.ganho);
+    const quando = motor.proximo;
+    if (entrouPorSalto) g.gain.setValueCurveAtTime(curva(true), quando, XF);
+    if (salto) g.gain.setValueCurveAtTime(curva(false), quando + dur, XF);
+    fonte.start(quando, motor.cursor, Math.min(dur + (salto ? XF : 0), buf.duration - motor.cursor));
+    fonte.onended = () => { motor.fontes = motor.fontes.filter((x) => x !== fonte); };
+    motor.fontes.push(fonte);
+    motor.segs.push({ quando, dur, de: motor.cursor, salto });
+    motor.agendado += dur;
+    motor.proximo = quando + dur;
+    if (salto) {
+      motor.ultimo = `último salto: ${fmt(salto.de)} → ${fmt(salto.para)}`;
+      motor.cursor = salto.para;
+    } else {
+      motor.fim = true;
+      fonte.onended = () => { if (motor.ativo) fimDaFaixa(); };
+    }
+  }
+  while (motor.segs.length > 4 && motor.segs[1].quando < ctx.currentTime) { motor.segs.shift(); }
+}
+
+function posicaoMotor() {
+  if (!motor.ativo) return 0;
+  const agora = motor.ctx.currentTime;
+  let seg = motor.segs[0];
+  for (const s of motor.segs) if (s.quando <= agora) seg = s;
+  return seg ? Math.min(motor.buf.duration, seg.de + Math.max(0, agora - seg.quando)) : 0;
+}
+
+async function tocarMotor(arquivo, desde = 0) {
+  const meu = ++motor.pedido;
+  garantirCtx();
+  pararMotor();
+  if (motor.arquivo !== arquivo) {
+    motor.buf = null; motor.arquivo = null;
+    aviso('Carregando a música para o loop inteligente...');
+    const dados = await (await fetch('/audio/' + encodeURIComponent(arquivo))).arrayBuffer();
+    const buf = await motor.ctx.decodeAudioData(dados);
+    if (meu !== motor.pedido) return;   // o usuário já escolheu outra
+    motor.buf = buf; motor.arquivo = arquivo;
+    aviso('');
+  }
+  await motor.ctx.resume();
+  if (meu !== motor.pedido) return;
+  motor.plano = loops[arquivo];
+  motor.cursor = desde; motor.agendado = 0; motor.fim = false; motor.usos = {}; motor.ultimo = '';
+  motor.proximo = motor.ctx.currentTime + 0.08;
+  motor.ativo = true;
+  agendar();
+  motor.timer = setInterval(agendar, 150);
+  desenhar();
+}
+
+function fimDaFaixa() {
+  voltas += 1;
+  if (prefs.modo === 'lista') proxima();
+  else tocar(atual);
+}
+
+function usaMotor() { return motor.ativo; }
+function pausado() { return usaMotor() ? motor.ctx.state !== 'running' : audio.paused; }
+function duracaoAtual() { return usaMotor() ? motor.buf.duration : audio.duration; }
+function tempoAtual() { return usaMotor() ? posicaoMotor() : audio.currentTime; }
+
 function tocar(arquivo) {
   atual = arquivo;
   voltas = 0;
-  audio.src = '/audio/' + encodeURIComponent(arquivo);
+  motor.pedido += 1;
+  pararMotor();
+  audio.pause();
   audio.volume = prefs.volume / 100;
+  if (prefs.ia && loops[arquivo]?.saltos.length) {
+    audio.removeAttribute('src');
+    tocarMotor(arquivo).catch((e) => { aviso('Loop inteligente falhou (' + e.message + '); tocando normal.', true); tocarComum(arquivo); });
+  } else {
+    tocarComum(arquivo);
+  }
+  desenhar();
+}
+
+function tocarComum(arquivo) {
+  audio.src = '/audio/' + encodeURIComponent(arquivo);
   audio.play().catch((e) => aviso('Não consegui tocar: ' + e.message, true));
   desenhar();
 }
@@ -121,6 +278,7 @@ function proxima() {
 
 // Fim da faixa = o loop em si.
 audio.addEventListener('ended', () => {
+  if (usaMotor()) return;
   voltas += 1;
   if (prefs.modo === 'lista') proxima();
   else { audio.currentTime = 0; audio.play(); desenhar(); }
@@ -128,29 +286,37 @@ audio.addEventListener('ended', () => {
 
 audio.addEventListener('error', () => { if (atual) aviso('Erro ao carregar a música (o arquivo ainda existe?)', true); });
 audio.addEventListener('timeupdate', () => {
-  if (audio.duration) $('posicao').value = Math.round((audio.currentTime / audio.duration) * 1000);
+  if (!usaMotor() && audio.duration) $('posicao').value = Math.round((audio.currentTime / audio.duration) * 1000);
 });
 audio.addEventListener('play', desenhar);
 audio.addEventListener('pause', desenhar);
 
 function fmt(s) { s = Math.floor(s || 0); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; }
 setInterval(() => {
-  if (atual) $('sub').textContent =
-    `${fmt(audio.currentTime)} / ${fmt(audio.duration)} · voltas completas: ${voltas}` + (audio.paused ? ' · pausado' : '');
+  if (!atual) return;
+  const d = duracaoAtual();
+  if (usaMotor() && d) $('posicao').value = Math.round((tempoAtual() / d) * 1000);
+  $('sub').textContent = usaMotor()
+    ? `${fmt(tempoAtual())} / ${fmt(d)} · 🧠 loop inteligente` + (pausado() ? ' · pausado' : '')
+    : `${fmt(audio.currentTime)} / ${fmt(audio.duration)} · voltas completas: ${voltas}` + (audio.paused ? ' · pausado' : '');
+  $('iaInfo').textContent = usaMotor() ? [loops[atual]?.resumo, motor.ultimo].filter(Boolean).join(' · ') : '';
 }, 500);
 
 function desenhar() {
-  $('agora').textContent = atual ? (audio.paused ? '⏸ ' : '') + titulo(atual) : '—';
+  $('agora').textContent = atual ? (pausado() ? '⏸ ' : '') + titulo(atual) : '—';
   if (!atual) $('sub').textContent = '';
   $('posicao').disabled = !atual;
   $('modoFaixa').classList.toggle('on', prefs.modo === 'faixa');
   $('modoLista').classList.toggle('on', prefs.modo === 'lista');
   $('aleatorio').classList.toggle('on', prefs.aleatorio);
+  $('ia').classList.toggle('on', prefs.ia);
+  $('minutos').value = String(prefs.minutos);
   $('volume').value = prefs.volume;
   $('volumeNum').textContent = prefs.volume + '%';
   $('lista').innerHTML = musicas.length ? musicas.map((f) => `
     <div class="faixa ${atual === f.arquivo ? 'ativa' : ''}">
-      <span class="nome" title="${esc(f.titulo)}">${esc(f.titulo)}</span>
+      <span class="nome" title="${esc(f.titulo)}">${esc(f.titulo)}${loops[f.arquivo] ? `<span class="badge" title="${esc(loops[f.arquivo].resumo || '')}">🧠 ${loops[f.arquivo].saltos.length} loops${loops[f.arquivo].porIA ? ' · IA' : ''}</span>` : ''}</span>
+      <button data-analisar="${esc(f.arquivo)}" title="Analisar loops desta música">🧠</button>
       <button data-tocar="${esc(f.arquivo)}">▶ Tocar</button>
       <button data-apagar="${esc(f.arquivo)}" title="Apagar do disco">🗑</button>
     </div>`).join('') : '<div style="color:var(--mudo)">Nenhuma música ainda. Baixe uma abaixo.</div>';
@@ -158,12 +324,24 @@ function desenhar() {
 
 async function carregar() {
   musicas = await (await fetch('/api/musicas')).json();
+  try { loops = await (await fetch('/api/loops')).json(); } catch { loops = {}; }
   desenhar();
 }
 
-function pausar() { if (!atual) return; audio.paused ? audio.play() : audio.pause(); }
-function parar() { audio.pause(); audio.removeAttribute('src'); audio.load(); atual = null; desenhar(); }
-function volume(v) { prefs.volume = Math.min(100, Math.max(0, v)); audio.volume = prefs.volume / 100; guardar(); desenhar(); }
+function pausar() {
+  if (!atual) return;
+  if (usaMotor()) { (motor.ctx.state === 'running' ? motor.ctx.suspend() : motor.ctx.resume()).then(desenhar); return; }
+  audio.paused ? audio.play() : audio.pause();
+}
+function parar() {
+  motor.pedido += 1; pararMotor();
+  audio.pause(); audio.removeAttribute('src'); audio.load(); atual = null; desenhar();
+}
+function volume(v) {
+  prefs.volume = Math.min(100, Math.max(0, v)); audio.volume = prefs.volume / 100;
+  if (motor.ganho) motor.ganho.gain.value = prefs.volume / 100;
+  guardar(); desenhar();
+}
 function modo(m) { prefs.modo = m; guardar(); desenhar(); }
 
 $('pausar').onclick = pausar;
@@ -178,12 +356,18 @@ $('modoFaixa').onclick = () => modo('faixa');
 $('modoLista').onclick = () => modo('lista');
 $('aleatorio').onclick = () => { prefs.aleatorio = !prefs.aleatorio; guardar(); desenhar(); };
 $('volume').oninput = (e) => volume(Number(e.target.value));
-$('posicao').oninput = (e) => { if (audio.duration) audio.currentTime = (e.target.value / 1000) * audio.duration; };
+$('posicao').oninput = (e) => {
+  if (usaMotor()) tocarMotor(atual, (e.target.value / 1000) * motor.buf.duration);
+  else if (audio.duration) audio.currentTime = (e.target.value / 1000) * audio.duration;
+};
+$('ia').onclick = () => { prefs.ia = !prefs.ia; guardar(); desenhar(); if (atual) tocar(atual); };
+$('minutos').onchange = (e) => { prefs.minutos = Number(e.target.value); guardar(); };
 
 $('lista').onclick = async (e) => {
   const b = e.target.closest('button');
   if (!b) return;
   if (b.dataset.tocar) tocar(b.dataset.tocar);
+  if (b.dataset.analisar) pedirAnalise({ arquivo: b.dataset.analisar });
   if (b.dataset.apagar && confirm('Apagar esta música do disco?')) {
     if (atual === b.dataset.apagar) parar();
     const r = await (await fetch('/api/apagar', { method: 'POST', body: JSON.stringify({ arquivo: b.dataset.apagar }) })).json();
@@ -217,6 +401,40 @@ $('baixar').onclick = async () => {
   }, 800);
 };
 
+// ---------- análise de loops ----------
+async function estadoOllama() {
+  try {
+    const o = await (await fetch('/api/ollama')).json();
+    $('ollamaEstado').textContent = o.ativo
+      ? 'Ollama ligado · modelo: ' + (o.modelo ?? 'nenhum instalado')
+      : 'Ollama desligado (abro sozinho ao analisar)';
+  } catch {}
+}
+
+let vigiando = false;
+async function pedirAnalise(corpo) {
+  await fetch('/api/analise', { method: 'POST', body: JSON.stringify(corpo) });
+  vigiar();
+}
+
+function vigiar() {
+  if (vigiando) return;
+  vigiando = true;
+  const t = setInterval(async () => {
+    const a = await (await fetch('/api/analise')).json();
+    $('analiseProg').textContent = a.ativo
+      ? `Analisando ${titulo(a.arquivo)}: ${a.etapa}${a.fila ? ` (faltam ${a.fila})` : ''}` : '';
+    if (a.ativo) return;
+    clearInterval(t); vigiando = false;
+    $('analiseProg').textContent = a.erros.length ? '' : 'Análise concluída.';
+    if (a.erros.length) aviso(a.erros.join(' | '), true);
+    await carregar(); estadoOllama();
+  }, 1000);
+}
+
+$('analisarTodas').onclick = () => pedirAnalise({ todas: true });
+fetch('/api/analise').then((r) => r.json()).then((a) => { if (a.ativo) vigiar(); });
+estadoOllama();
 carregar();
 </script>
 </body>
